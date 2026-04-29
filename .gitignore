@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+
+# Environment variables and secrets
+.env
+
+# Logs
+logs/
+*.log
+
+# Generated reports and temporary files
+reports/*.pdf
+reports/*.png
+reports/*.tmp
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# System files
+.DS_Store
+Thumbs.db
