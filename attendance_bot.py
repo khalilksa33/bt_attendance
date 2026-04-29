@@ -72,13 +72,13 @@ def add_page_header(pdf, month_name, page_title):
         pdf.set_y(18)
     else:
         pdf.set_y(12)
-    pdf.set_x(40)
-    pdf.cell(pdf.w - 50, 6, "Insight International Contracting Company (IICC) www.iicc.sa", ln=1, align='C')
+    pdf.set_x(0)
+    pdf.cell(pdf.w, 6, "Insight International Contracting Company (IICC) www.iicc.sa", ln=1, align='C')
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(pdf.w - 50, 6, page_title, ln=1, align='C')
+    pdf.cell(pdf.w, 6, page_title, ln=1, align='C')
     pdf.set_font("Arial", "", 10)
-    pdf.cell(pdf.w - 50, 5, f"Month: {month_name}", ln=1, align='C')
-    pdf.cell(pdf.w - 50, 5, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  |  Page {pdf.page_no()}", ln=1, align='C')
+    pdf.cell(pdf.w, 5, f"Month: {month_name}", ln=1, align='C')
+    pdf.cell(pdf.w, 5, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  |  Page {pdf.page_no()}", ln=1, align='C')
     pdf.ln(3)
 
 
