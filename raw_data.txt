@@ -1,0 +1,21 @@
+    user_id           timestamp
+0         3 2026-01-01 09:19:52
+1         6 2026-01-01 14:10:37
+2         3 2026-01-01 17:48:29
+3         6 2026-01-03 10:18:30
+4         6 2026-01-03 10:26:09
+5         4 2026-01-03 11:07:08
+6         4 2026-01-03 16:35:23
+7         2 2026-01-03 17:10:17
+8         1 2026-01-03 17:30:32
+9         3 2026-01-03 18:50:24
+
+                  employee_name attendance_device_id                     department                    designation
+0      CHAUHDRY  MUHAMMAD ASLAM                    1              Management - ITMC        Chief Executive Officer
+1            AHMED HASAN MARJAN                    2              Management - ITMC             Executive Director
+2           SYED SULEMAN HAIDER                    3                      HR - IICC                     HR Manager
+3  MOHAMMAD BASHEER ABDUL AZEEZ                    4                Accounts - IHTS                     Accountant
+4  KHALIL AHMAD MUHAMMAD YAQOOB                    5  Information Technology - IICC  IT Technical Support Engineer
+5           MUHAMMAD ZAFAR HAJI                    6              Management - ITMC                         Driver
+6       ALJABRI ABDULELAH MAJED                  NaN                            NaN                            NaN
+7           MUHAMMAD ATIF ZAFAR                   11               Operations - ITT             Operations Manager

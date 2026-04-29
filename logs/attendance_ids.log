@@ -1,0 +1,50 @@
+Attendance log initialized: 2026-04-28T09:21:46+03:00
+
+===== Attendance ID Log: 2026-04-28T17:34:36.957158 =====
+Biometric IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+ERP IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+Remote check-in IDs (1): ['5']
+Remote matched ERP IDs (1): ['5']
+Remote-only IDs (0): []
+Matched IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+Biometric-only IDs (0): []
+ERP-only IDs (0): []
+====================================================
+
+===== Attendance ID Log: 2026-04-28T17:35:27.661851 =====
+Biometric IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+ERP IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+Remote check-in IDs (1): ['5']
+Remote matched ERP IDs (1): ['5']
+Remote-only IDs (0): []
+Matched IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+Biometric-only IDs (0): []
+ERP-only IDs (0): []
+====================================================
+
+===== Attendance ID Log: 2026-04-28T17:38:50.926818 =====
+Biometric IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+ERP IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+Remote check-in IDs (1): ['5']
+Remote matched ERP IDs (1): ['5']
+Remote-only IDs (0): []
+Matched IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+Biometric-only IDs (0): []
+ERP-only IDs (0): []
+====================================================
+
+===== Attendance ID Log: 2026-04-28T18:17:53.435880 =====
+Biometric IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+ERP IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+Matched IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+Biometric-only IDs (0): []
+ERP-only IDs (0): []
+====================================================
+
+===== Attendance ID Log: 2026-04-29T14:53:48.041301 =====
+Biometric IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+ERP IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+Matched IDs (7): ['1', '11', '2', '3', '4', '5', '6']
+Biometric-only IDs (0): []
+ERP-only IDs (0): []
+====================================================
