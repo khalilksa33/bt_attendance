@@ -68,7 +68,7 @@ def add_page_header(pdf, month_name, page_title):
     pdf.set_font("Arial", "B", 14)
     pdf.set_y(10)
     if LOGO_PATH.is_file():
-        pdf.image(str(LOGO_PATH), x=10, y=10, w=25)
+        pdf.image(str(LOGO_PATH), x=(pdf.w - 25) / 2, y=10, w=25)
         pdf.set_y(18)
     else:
         pdf.set_y(12)
