@@ -56,9 +56,9 @@ def should_send_report(now=None):
         now = datetime.now()
     if os.getenv("FORCE_SEND", "0") == "1":
         return True
-    if now.hour != 11:
+    if now.hour != 10:
         return False
-    return now.weekday() == 4 or now.day == 1
+    return True
 
 
 def add_page_header(pdf, month_name, page_title):
@@ -68,17 +68,18 @@ def add_page_header(pdf, month_name, page_title):
     pdf.set_font("Arial", "B", 14)
     pdf.set_y(10)
     if LOGO_PATH.is_file():
-        pdf.image(str(LOGO_PATH), x=(pdf.w - 25) / 2, y=10, w=25)
+        pdf.image(str(LOGO_PATH), x=10, y=10, w=25)
         pdf.set_y(18)
     else:
         pdf.set_y(12)
-    pdf.set_x(0)
-    pdf.cell(pdf.w, 6, "Insight International Contracting Company (IICC) www.iicc.sa", ln=1, align='C')
+    pdf.set_x(pdf.l_margin)
+    content_width = pdf.w - pdf.l_margin - pdf.r_margin
+    pdf.cell(content_width, 6, "Insight International Contracting Company (IICC) www.iicc.sa", ln=1, align='C')
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(pdf.w, 6, page_title, ln=1, align='C')
+    pdf.cell(content_width, 6, page_title, ln=1, align='C')
     pdf.set_font("Arial", "", 10)
-    pdf.cell(pdf.w, 5, f"Month: {month_name}", ln=1, align='C')
-    pdf.cell(pdf.w, 5, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  |  Page {pdf.page_no()}", ln=1, align='C')
+    pdf.cell(content_width, 5, f"Month: {month_name}", ln=1, align='C')
+    pdf.cell(content_width, 5, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  |  Page {pdf.page_no()}", ln=1, align='C')
     pdf.ln(3)
 
 
@@ -483,7 +484,7 @@ def send_whatsapp(filename, month_name):
 if __name__ == "__main__":
     # Execution Logic
     if not should_send_report():
-        print("Skipping report generation. Scheduled for Fridays at 11:00 and on the 1st of each month at 11:00 unless FORCE_SEND=1.")
+        print("Skipping report generation. Scheduled for daily 10:00 AM unless FORCE_SEND=1.")
         sys.exit(0)
     df_bio = get_biometric_data()
     df_users = get_erp_users()

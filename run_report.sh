@@ -18,7 +18,6 @@ else
 fi
 
 # Cron schedule examples:
-# Every Friday at 11:00 AM
-# 0 11 * * 5 /bin/bash /home/frappe/bt_attendance/run_report.sh >> /home/frappe/bt_attendance/log.txt 2>&1
-# On the 1st of each month at 11:00 AM
-# 0 11 1 * * /bin/bash /home/frappe/bt_attendance/run_report.sh >> /home/frappe/bt_attendance/log.txt 2>&1
+# Cron schedule example:
+# Daily at 10:00 AM
+# 0 10 * * * /bin/bash /home/frappe/bt_attendance/run_report.sh >> /home/frappe/bt_attendance/log.txt 2>&1
