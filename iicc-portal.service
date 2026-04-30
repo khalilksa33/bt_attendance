@@ -1,0 +1,16 @@
+[Unit]
+Description=IICC Attendance Remote Check-in Portal
+After=network.target
+
+[Service]
+Type=simple
+User=frappe
+WorkingDirectory=/home/frappe/bt_attendance
+ExecStart=/bin/bash -c 'cd /home/frappe/bt_attendance && source .venv/bin/activate && python portal.py'
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/frappe/bt_attendance/logs/portal.log
+StandardError=append:/home/frappe/bt_attendance/logs/portal.log
+
+[Install]
+WantedBy=multi-user.target
