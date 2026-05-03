@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import os
 import json
 import sys
+import argparse
 from pathlib import Path
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
@@ -44,7 +45,17 @@ erp_url = os.getenv("ERP_URL")
 api_key = os.getenv("ERP_API_KEY")
 email_pass = os.getenv("EMAIL_PASS")
 
-print(f"Connecting to ERP at: {erp_url}")
+def normalize_whatsapp_number(number):
+    normalized = str(number or "").strip()
+    if not normalized:
+        return ""
+    if normalized.startswith("whatsapp:"):
+        return normalized
+    if normalized.startswith("+"):
+        return f"whatsapp:{normalized}"
+    if normalized.isdigit():
+        return f"whatsapp:+{normalized}"
+    return normalized
 
 
 def ensure_log_file_exists():
@@ -57,6 +68,33 @@ def ensure_log_file_exists():
     return log_path
 
 ensure_log_file_exists()
+
+
+def parse_month_arg(month_str):
+    if not month_str:
+        return None
+    try:
+        if len(month_str) == 7:
+            return datetime.strptime(month_str, "%Y-%m")
+        return datetime.fromisoformat(month_str)
+    except ValueError:
+        raise ValueError("--month must be YYYY-MM or YYYY-MM-DD")
+
+
+def get_month_range(reference_date):
+    month_start = datetime(reference_date.year, reference_date.month, 1)
+    last_day = calendar.monthrange(reference_date.year, reference_date.month)[1]
+    month_end = datetime(reference_date.year, reference_date.month, last_day, 23, 59, 59, 999999)
+    return month_start, month_end
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Generate attendance PDF reports.")
+    parser.add_argument(
+        "--month",
+        help="Generate a one-off report for the specified month in YYYY-MM or YYYY-MM-DD format."
+    )
+    return parser.parse_args()
 
 
 def should_send_report(now=None):
@@ -103,11 +141,12 @@ def add_page_footer(pdf):
     pdf.set_text_color(0, 0, 0)
 
 # 1. Fetch Biometric Data
-def get_biometric_data():
-    # Fetch biometric attendance records from the current month
-    now = datetime.now()
-    month_start = datetime(now.year, now.month, 1)
-    month_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+def get_biometric_data(start_date=None, end_date=None):
+    # Fetch biometric attendance records for a month range
+    if start_date is None or end_date is None:
+        now = datetime.now()
+        start_date = datetime(now.year, now.month, 1)
+        end_date = now.replace(hour=23, minute=59, second=59, microsecond=999999)
 
     zk = ZK(BIOMETRIC_IP, port=BIOMETRIC_PORT, timeout=5)
     conn = zk.connect()
@@ -115,7 +154,7 @@ def get_biometric_data():
     filtered_attendance = [
         {'user_id': str(record.user_id), 'timestamp': record.timestamp}
         for record in attendance
-        if month_start <= record.timestamp <= month_end
+        if start_date <= record.timestamp <= end_date
     ]
     df_biometric = pd.DataFrame(filtered_attendance)
     conn.disconnect()
@@ -155,6 +194,12 @@ def get_erp_attendance_data(start_date=None, end_date=None):
         'limit_page_length': 1000,
     }
     response = requests.get(url, headers=headers, params=params, timeout=30)
+    if response.status_code == 417:
+        # Some ERP installations block query access to the attendance_time field.
+        fallback_params = params.copy()
+        fallback_fields = [ERP_ATTENDANCE_EMPLOYEE_FIELD, ERP_ATTENDANCE_DATE_FIELD]
+        fallback_params['fields'] = json.dumps(fallback_fields)
+        response = requests.get(url, headers=headers, params=fallback_params, timeout=30)
     response.raise_for_status()
     data = response.json().get('data', [])
 
@@ -220,7 +265,7 @@ def sync_biometric_data_to_erp(df_bio):
         push_checkin_to_erp({'user_id': str(row['user_id']), 'timestamp': row['timestamp']})
 
 
-def get_remote_checkin_data():
+def get_remote_checkin_data(start_date=None, end_date=None):
     remote_source = os.getenv("REMOTE_CHECKIN_SOURCE")
     if not remote_source:
         return pd.DataFrame(columns=['user_id', 'timestamp'])
@@ -253,6 +298,8 @@ def get_remote_checkin_data():
 
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
         df = df.dropna(subset=['user_id', 'timestamp'])
+        if start_date is not None and end_date is not None:
+            df = df[(df['timestamp'] >= start_date) & (df['timestamp'] <= end_date)]
         df['user_id'] = df['user_id'].astype(str)
         return df[['user_id', 'timestamp']]
     except Exception as exc:
@@ -291,6 +338,87 @@ def write_id_log(df_bio, df_users, df_remote):
         log_file.write("====================================================\n")
 
     print(f"Attendance ID log written to: {log_path}")
+
+
+def format_duration(start, end):
+    if not isinstance(start, datetime) or not isinstance(end, datetime):
+        return "N/A"
+    duration = end - start
+    if duration.total_seconds() < 0:
+        return "N/A"
+    hours = int(duration.total_seconds() // 3600)
+    minutes = int((duration.total_seconds() % 3600) // 60)
+    return f"{hours}h {minutes}m"
+
+
+def write_daily_checkin_log(df_merged, df_users, report_start, report_end):
+    log_dir = BASE_DIR / Path(os.getenv("LOG_DIR", "logs"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"daily_checkin_details_{report_start.strftime('%Y%m%d')}_{report_end.strftime('%Y%m%d')}.log"
+    log_path = log_dir / filename
+
+    df_users = df_users.copy()
+    df_users['attendance_device_id'] = df_users['attendance_device_id'].astype(str)
+    df_merged = df_merged.copy()
+    df_merged['attendance_device_id'] = df_merged['attendance_device_id'].astype(str)
+    df_merged['date'] = df_merged['timestamp'].dt.date
+
+    odd_entries = []
+    with log_path.open('w', encoding='utf-8') as log_file:
+        log_file.write("===== Daily Check-In Detail Log =====\n")
+        log_file.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        log_file.write(f"Report range: {report_start.date()} to {report_end.date()}\n")
+        log_file.write(f"Mapped employees: {len(df_users)}\n\n")
+
+        for _, user in df_users.sort_values('attendance_device_id').iterrows():
+            emp_id = str(user.get('attendance_device_id', '') or '').strip()
+            if not emp_id:
+                continue
+            emp_name = user.get('employee_name', 'N/A') or 'N/A'
+            designation = user.get('designation', 'N/A') or 'N/A'
+            department = user.get('department', 'N/A') or 'N/A'
+            log_file.write(f"Employee: {emp_id} | {emp_name} | {designation} | {department}\n")
+
+            emp_data = df_merged[df_merged['attendance_device_id'] == emp_id].sort_values('timestamp')
+            if emp_data.empty:
+                log_file.write("  No mapped check-in records in range.\n\n")
+                continue
+
+            for date_val, group in emp_data.groupby('date', sort=True):
+                times = [ts.strftime('%H:%M:%S') for ts in group['timestamp']]
+                date_label = f"{date_val} ({date_val.strftime('%a')})"
+
+                if len(times) == 1:
+                    log_file.write(f"  {date_label}: single punch {times[0]}\n")
+                    odd_entries.append((emp_id, emp_name, date_val, times, 'single punch'))
+                elif len(times) % 2 == 1:
+                    check_in = times[0]
+                    check_out = times[-1]
+                    duration = format_duration(group['timestamp'].iloc[0], group['timestamp'].iloc[-1])
+                    log_file.write(
+                        f"  {date_label}: check-in {check_in}, check-out {check_out}, duration {duration}, punches: {', '.join(times)} [ODD COUNT]\n"
+                    )
+                    odd_entries.append((emp_id, emp_name, date_val, times, 'odd count'))
+                else:
+                    check_in = times[0]
+                    check_out = times[-1]
+                    duration = format_duration(group['timestamp'].iloc[0], group['timestamp'].iloc[-1])
+                    log_file.write(
+                        f"  {date_label}: check-in {check_in}, check-out {check_out}, duration {duration}, punches: {', '.join(times)}\n"
+                    )
+
+            log_file.write("\n")
+
+        log_file.write("===== ODD / INCOMPLETE CHECK-INS =====\n")
+        if not odd_entries:
+            log_file.write("No odd or incomplete records found.\n")
+        else:
+            for emp_id, emp_name, date_val, times, reason in odd_entries:
+                log_file.write(
+                    f"Employee {emp_id} | {emp_name} | {date_val} | reason={reason} | punches: {', '.join(times)}\n"
+                )
+
+    print(f"Daily check-in detail log written to: {log_path}")
 
 # 3. Generate PDF Summary
 # 3. Generate PDF Summary
@@ -511,16 +639,31 @@ def send_email(filename, month_name):
         server.send_message(msg)
 
 
-def send_whatsapp(filename, month_name):
-    to_number = os.getenv("WHATSAPP_TO_NUMBER")
-    from_number = os.getenv("WHATSAPP_FROM_NUMBER")
-    if not to_number or not from_number:
-        print("WhatsApp not configured; skipping WhatsApp notification.")
+def send_whatsapp(filename, month_name, to_numbers=None, from_number=None):
+    if isinstance(to_numbers, str):
+        to_numbers = [item.strip() for item in to_numbers.replace(";", ",").split(",") if item.strip()]
+    elif to_numbers is None:
+        candidates = os.getenv("WHATSAPP_TO_NUMBER") or os.getenv("WHATSAPP_TO_NUMBERS")
+        to_numbers = [item.strip() for item in str(candidates or "").replace(";", ",").split(",") if item.strip()]
+
+    if not to_numbers:
+        print("WhatsApp recipient numbers are not configured; skipping WhatsApp notification.")
+        return
+
+    from_number = from_number or os.getenv("WHATSAPP_FROM_NUMBER")
+    if not from_number:
+        print("WhatsApp from number is not configured; skipping WhatsApp notification.")
+        return
+
+    from_number = normalize_whatsapp_number(from_number)
+    to_numbers = [normalize_whatsapp_number(number) for number in to_numbers if normalize_whatsapp_number(number)]
+    if not to_numbers:
+        print("No valid WhatsApp recipient numbers were provided; skipping WhatsApp notification.")
         return
 
     message_template = os.getenv(
         "WHATSAPP_MESSAGE_TEMPLATE",
-        f"Attendance report for {month_name} is ready. Please check your email or download from the provided link."
+        f"Daily check-in log for {month_name} is ready. File: {Path(filename).name}"
     )
     message = message_template.replace("{month_name}", month_name).replace("{filename}", Path(filename).name)
 
@@ -530,18 +673,19 @@ def send_whatsapp(filename, month_name):
 
     if twilio_sid and twilio_token:
         url = f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}/Messages.json"
-        data = {
-            "From": f"whatsapp:{from_number}",
-            "To": f"whatsapp:{to_number}",
-            "Body": message,
-        }
-        if media_base:
-            data["MediaUrl"] = media_base.rstrip("/") + "/" + Path(filename).name
-        response = requests.post(url, data=data, auth=(twilio_sid, twilio_token), timeout=30)
-        if response.ok:
-            print("WhatsApp notification sent via Twilio.")
-        else:
-            print(f"WhatsApp send failed via Twilio: {response.status_code} {response.text}")
+        for recipient in to_numbers:
+            data = {
+                "From": from_number,
+                "To": recipient,
+                "Body": message,
+            }
+            if media_base:
+                data["MediaUrl"] = media_base.rstrip("/") + "/" + Path(filename).name
+            response = requests.post(url, data=data, auth=(twilio_sid, twilio_token), timeout=30)
+            if response.ok:
+                print(f"WhatsApp notification sent to {recipient} via Twilio.")
+            else:
+                print(f"WhatsApp send failed for {recipient} via Twilio: {response.status_code} {response.text}")
         return
 
     api_url = os.getenv("WHATSAPP_API_URL")
@@ -551,17 +695,18 @@ def send_whatsapp(filename, month_name):
             "Authorization": f"Bearer {api_token}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "to": to_number,
-            "message": message,
-        }
-        if media_base:
-            payload["media_url"] = media_base.rstrip("/") + "/" + Path(filename).name
-        response = requests.post(api_url, json=payload, headers=headers, timeout=30)
-        if response.ok:
-            print("WhatsApp notification sent via generic API.")
-        else:
-            print(f"WhatsApp send failed via generic API: {response.status_code} {response.text}")
+        for recipient in to_numbers:
+            payload = {
+                "to": recipient,
+                "message": message,
+            }
+            if media_base:
+                payload["media_url"] = media_base.rstrip("/") + "/" + Path(filename).name
+            response = requests.post(api_url, json=payload, headers=headers, timeout=30)
+            if response.ok:
+                print(f"WhatsApp notification sent to {recipient} via generic API.")
+            else:
+                print(f"WhatsApp send failed for {recipient} via generic API: {response.status_code} {response.text}")
         return
 
     print("WhatsApp service configuration is incomplete; skipping WhatsApp notification.")
@@ -569,13 +714,25 @@ def send_whatsapp(filename, month_name):
 
 if __name__ == "__main__":
     # Execution Logic
-    if not should_send_report():
-        print("Skipping report generation. Scheduled for daily 10:00 AM unless FORCE_SEND=1.")
-        sys.exit(0)
-    df_erp_attendance = get_erp_attendance_data()
-    df_bio = get_biometric_data()
+    args = parse_args()
+    ensure_log_file_exists()
+    report_date = parse_month_arg(args.month) if args.month else None
+
+    if report_date is None:
+        if not should_send_report():
+            print("Skipping report generation. Scheduled for daily 10:00 AM unless FORCE_SEND=1.")
+            sys.exit(0)
+        report_date = datetime.now()
+    else:
+        print(f"Generating one-off attendance report for {report_date.strftime('%B %Y')}.")
+
+    report_start, report_end = get_month_range(report_date)
+    month_name = f"{calendar.month_name[report_date.month]} {report_date.year}"
+
+    df_erp_attendance = get_erp_attendance_data(report_start, report_end)
+    df_bio = get_biometric_data(report_start, report_end)
     df_users = get_erp_users()
-    df_remote = get_remote_checkin_data()
+    df_remote = get_remote_checkin_data(report_start, report_end)
 
     if os.getenv("SYNC_BIOMETRIC_TO_ERP", "0") == "1":
         sync_biometric_data_to_erp(df_bio)
@@ -595,6 +752,8 @@ if __name__ == "__main__":
     df_merged = pd.merge(df_attendance, df_users, left_on='user_id', right_on='attendance_device_id')
     df_merged['date'] = df_merged['timestamp'].dt.date
     df_merged['time'] = df_merged['timestamp'].dt.time
+
+    write_daily_checkin_log(df_merged, df_users, report_start, report_end)
 
     # Calculate hours worked per employee
     def calculate_hours(group):
@@ -650,11 +809,7 @@ if __name__ == "__main__":
     df_summary['percentage'] = (df_summary['total_hours'] / 216) * 100
 
     now = datetime.now()
-    month_name = f"{calendar.month_name[now.month]} {now.year}"
-    month_start = datetime(now.year, now.month, 1)
-    month_end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-    
-    df_month = df_merged[(df_merged['timestamp'] >= month_start) & (df_merged['timestamp'] <= month_end)].copy()
+    df_month = df_merged[(df_merged['timestamp'] >= report_start) & (df_merged['timestamp'] <= report_end)].copy()
 
     df_month_summary = df_month.groupby('attendance_device_id').apply(calculate_hours).reset_index(name='total_hours')
     df_summary = df_template.merge(df_user_info, on='attendance_device_id', how='left').merge(
@@ -668,7 +823,7 @@ if __name__ == "__main__":
     df_summary['percentage'] = (df_summary['total_hours'] / 216) * 100
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    output_name = f"attendance_report_{now.strftime('%Y_%m_%d')}.pdf"
+    output_name = f"attendance_report_{now.strftime('%Y%m%d_%H%M%S')}.pdf"
     pdf_path = str(OUTPUT_DIR / output_name)
     create_pdf(df_summary, pdf_path, month_name, df_month)
     send_email(pdf_path, month_name)

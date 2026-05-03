@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+import argparse
+from datetime import datetime, timedelta
+from pathlib import Path
+import os
+import pandas as pd
+
+from attendance_bot import (
+    get_erp_users,
+    get_erp_attendance_data,
+    get_biometric_data,
+    get_remote_checkin_data,
+    write_daily_checkin_log,
+    send_whatsapp,
+)
+
+BASE_DIR = Path(__file__).resolve().parent
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Generate a daily-only human-readable check-in log and notify selected WhatsApp recipients."
+    )
+    parser.add_argument(
+        "--date",
+        help="Date for the log in YYYY-MM-DD format. Defaults to today.",
+    )
+    parser.add_argument(
+        "--start",
+        help="Start date for range in YYYY-MM-DD format. Overrides --date when both are provided.",
+    )
+    parser.add_argument(
+        "--end",
+        help="End date for range in YYYY-MM-DD format. Required when --start is provided.",
+    )
+    parser.add_argument(
+        "--to",
+        help="Comma-separated WhatsApp recipient numbers. Example: +966500861820,+966500860633",
+    )
+    parser.add_argument(
+        "--from",
+        dest="from_number",
+        help="WhatsApp from number. Example: +966507163166",
+    )
+    return parser.parse_args()
+
+
+def parse_date_range(date_arg, start_arg, end_arg):
+    if start_arg:
+        if not end_arg:
+            raise ValueError("When --start is set, --end must also be provided.")
+        start = datetime.fromisoformat(start_arg)
+        end = datetime.fromisoformat(end_arg)
+        end = end.replace(hour=23, minute=59, second=59, microsecond=999999)
+        return start, end
+
+    if date_arg:
+        report_date = datetime.fromisoformat(date_arg)
+    else:
+        report_date = datetime.now()
+    start = datetime(report_date.year, report_date.month, report_date.day)
+    end = start.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return start, end
+
+
+def main():
+    args = parse_args()
+    report_start, report_end = parse_date_range(args.date, args.start, args.end)
+    report_name = report_start.strftime("%Y-%m-%d")
+
+    print(f"Generating daily check-in log for {report_start.date()} to {report_end.date()}")
+
+    df_erp_attendance = get_erp_attendance_data(report_start, report_end)
+    df_bio = get_biometric_data(report_start, report_end)
+    df_users = get_erp_users()
+    df_remote = get_remote_checkin_data(report_start, report_end)
+
+    attendance_frames = []
+    for frame in (df_erp_attendance, df_bio, df_remote):
+        if not frame.empty:
+            attendance_frames.append(frame)
+
+    if attendance_frames:
+        df_attendance = pd.concat(attendance_frames, ignore_index=True)
+    else:
+        df_attendance = pd.DataFrame(columns=['user_id', 'timestamp'])
+
+    df_attendance = df_attendance.drop_duplicates(subset=['user_id', 'timestamp'])
+    df_attendance['user_id'] = df_attendance['user_id'].astype(str)
+    df_users['attendance_device_id'] = df_users['attendance_device_id'].astype(str)
+
+    df_merged = pd.merge(df_attendance, df_users, left_on='user_id', right_on='attendance_device_id')
+    df_merged['timestamp'] = pd.to_datetime(df_merged['timestamp'], errors='coerce')
+
+    write_daily_checkin_log(df_merged, df_users, report_start, report_end)
+
+    recipients = args.to.split(",") if args.to else ["+966500861820", "+966500860633"]
+    recipients = [item.strip() for item in recipients if item.strip()]
+    from_number = args.from_number or "+966507163166"
+
+    log_filename = f"daily_checkin_details_{report_start.strftime('%Y%m%d')}_{report_end.strftime('%Y%m%d')}.log"
+    log_path = BASE_DIR / "logs" / log_filename
+
+    send_whatsapp(
+        str(log_path),
+        report_name,
+        to_numbers=recipients,
+        from_number=from_number,
+    )
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        print(f"Error: {exc}")
+        raise

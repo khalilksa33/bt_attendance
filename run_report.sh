@@ -17,7 +17,6 @@ else
     echo "Error: Report generation failed." >&2
 fi
 
-# Cron schedule examples:
-# Cron schedule example:
+# Cron schedule:
 # Daily at 10:00 AM
 # 0 10 * * * /bin/bash /home/frappe/bt_attendance/run_report.sh >> /home/frappe/bt_attendance/log.txt 2>&1

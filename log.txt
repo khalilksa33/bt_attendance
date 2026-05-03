@@ -1,0 +1,34 @@
+Starting Attendance Report Generation for April...
+Connecting to ERP at: https://erp.iicc.sa
+Traceback (most recent call last):
+  File "/home/frappe/bt_attendance/attendance_bot.py", line 575, in <module>
+    df_erp_attendance = get_erp_attendance_data()
+  File "/home/frappe/bt_attendance/attendance_bot.py", line 158, in get_erp_attendance_data
+    response.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/frappe/bt_attendance/.venv/lib/python3.14/site-packages/requests/models.py", line 1028, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 417 Client Error: Expectation Failed for url: https://erp.iicc.sa/api/resource/Attendance?fields=%5B%22employee%22%2C+%22attendance_date%22%2C+%22attendance_time%22%5D&filters=%5B%5B%22Attendance%22%2C+%22attendance_date%22%2C+%22%3E%3D%22%2C+%222026-04-01%22%5D%2C+%5B%22Attendance%22%2C+%22attendance_date%22%2C+%22%3C%3D%22%2C+%222026-04-30%22%5D%5D&limit_page_length=1000
+Error: Report generation failed.
+Starting Attendance Report Generation for May...
+Connecting to ERP at: https://erp.iicc.sa
+Traceback (most recent call last):
+  File "/home/frappe/bt_attendance/attendance_bot.py", line 575, in <module>
+    df_erp_attendance = get_erp_attendance_data()
+  File "/home/frappe/bt_attendance/attendance_bot.py", line 158, in get_erp_attendance_data
+    response.raise_for_status()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/frappe/bt_attendance/.venv/lib/python3.14/site-packages/requests/models.py", line 1028, in raise_for_status
+    raise HTTPError(http_error_msg, response=self)
+requests.exceptions.HTTPError: 417 Client Error: Expectation Failed for url: https://erp.iicc.sa/api/resource/Attendance?fields=%5B%22employee%22%2C+%22attendance_date%22%2C+%22attendance_time%22%5D&filters=%5B%5B%22Attendance%22%2C+%22attendance_date%22%2C+%22%3E%3D%22%2C+%222026-05-01%22%5D%2C+%5B%22Attendance%22%2C+%22attendance_date%22%2C+%22%3C%3D%22%2C+%222026-05-01%22%5D%5D&limit_page_length=1000
+Error: Report generation failed.
+Starting Attendance Report Generation for May...
+Connecting to ERP at: https://erp.iicc.sa
+Attendance ID log written to: /home/frappe/bt_attendance/logs/attendance_ids.log
+WhatsApp not configured; skipping WhatsApp notification.
+Report sent successfully.
+Starting Attendance Report Generation for May...
+Connecting to ERP at: https://erp.iicc.sa
+Attendance ID log written to: /home/frappe/bt_attendance/logs/attendance_ids.log
+WhatsApp not configured; skipping WhatsApp notification.
+Report sent successfully.
