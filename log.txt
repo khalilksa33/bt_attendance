@@ -32,3 +32,35 @@ Connecting to ERP at: https://erp.iicc.sa
 Attendance ID log written to: /home/frappe/bt_attendance/logs/attendance_ids.log
 WhatsApp not configured; skipping WhatsApp notification.
 Report sent successfully.
+Starting Attendance Report Generation for May...
+Traceback (most recent call last):
+  File "/home/frappe/bt_attendance/attendance_bot.py", line 732, in <module>
+    df_erp_attendance = get_erp_attendance_data(report_start, report_end)
+  File "/home/frappe/bt_attendance/attendance_bot.py", line 196, in get_erp_attendance_data
+    response = requests.get(url, headers=headers, params=params, timeout=30)
+  File "/home/frappe/bt_attendance/.venv/lib/python3.14/site-packages/requests/api.py", line 73, in get
+    return request("get", url, params=params, **kwargs)
+  File "/home/frappe/bt_attendance/.venv/lib/python3.14/site-packages/requests/api.py", line 59, in request
+    return session.request(method=method, url=url, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/frappe/bt_attendance/.venv/lib/python3.14/site-packages/requests/sessions.py", line 578, in request
+    prep = self.prepare_request(req)
+  File "/home/frappe/bt_attendance/.venv/lib/python3.14/site-packages/requests/sessions.py", line 487, in prepare_request
+    p.prepare(
+    ~~~~~~~~~^
+        method=request.method.upper(),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<10 lines>...
+        hooks=merge_hooks(request.hooks, self.hooks),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/frappe/bt_attendance/.venv/lib/python3.14/site-packages/requests/models.py", line 369, in prepare
+    self.prepare_url(url, params)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/home/frappe/bt_attendance/.venv/lib/python3.14/site-packages/requests/models.py", line 440, in prepare_url
+    raise MissingSchema(
+    ...<2 lines>...
+    )
+requests.exceptions.MissingSchema: Invalid URL 'None/api/resource/Attendance': No scheme supplied. Perhaps you meant https://None/api/resource/Attendance?
+Error: Report generation failed.
