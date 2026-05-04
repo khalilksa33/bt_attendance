@@ -11,7 +11,7 @@ from attendance_bot import (
     get_biometric_data,
     get_remote_checkin_data,
     write_daily_checkin_log,
-    send_whatsapp,
+    send_email,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -63,50 +63,95 @@ def parse_date_range(date_arg, start_arg, end_arg):
     return start, end
 
 
+def generate_report_for_date(report_date, recipients, from_number):
+    report_start = datetime(report_date.year, report_date.month, report_date.day)
+    report_end = report_start.replace(hour=23, minute=59, second=59, microsecond=999999)
+    report_name = report_start.strftime("%d-%m-%Y")
+
+    print(f"Generating daily check-in log for {report_name}")
+
+    try:
+        df_erp_attendance = get_erp_attendance_data(report_start, report_end)
+        df_bio = get_biometric_data(report_start, report_end)
+        df_users = get_erp_users()
+        df_remote = get_remote_checkin_data(report_start, report_end)
+
+        attendance_frames = []
+        for frame in (df_erp_attendance, df_bio, df_remote):
+            if not frame.empty:
+                attendance_frames.append(frame)
+
+        if attendance_frames:
+            df_attendance = pd.concat(attendance_frames, ignore_index=True)
+        else:
+            df_attendance = pd.DataFrame(columns=['user_id', 'timestamp'])
+
+        df_attendance = df_attendance.drop_duplicates(subset=['user_id', 'timestamp'])
+        df_attendance['user_id'] = df_attendance['user_id'].astype(str)
+        df_users['attendance_device_id'] = df_users['attendance_device_id'].astype(str)
+
+        df_merged = pd.merge(df_attendance, df_users, left_on='user_id', right_on='attendance_device_id')
+        df_merged['timestamp'] = pd.to_datetime(df_merged['timestamp'], errors='coerce')
+
+        write_daily_checkin_log(df_merged, df_users, report_start, report_end)
+
+        log_path = BASE_DIR / "logs" / "daily_checkin_details.txt"
+
+        try:
+            send_email(
+                str(log_path),
+                report_name,
+            )
+        except Exception as exc:
+            print(f"Email send failed for daily_checkin_details.txt: {exc}")
+    except Exception as exc:
+        print(f"Report generation failed for {report_name}: {exc}")
+
+
 def main():
     args = parse_args()
-    report_start, report_end = parse_date_range(args.date, args.start, args.end)
-    report_name = report_start.strftime("%Y-%m-%d")
-
-    print(f"Generating daily check-in log for {report_start.date()} to {report_end.date()}")
-
-    df_erp_attendance = get_erp_attendance_data(report_start, report_end)
-    df_bio = get_biometric_data(report_start, report_end)
-    df_users = get_erp_users()
-    df_remote = get_remote_checkin_data(report_start, report_end)
-
-    attendance_frames = []
-    for frame in (df_erp_attendance, df_bio, df_remote):
-        if not frame.empty:
-            attendance_frames.append(frame)
-
-    if attendance_frames:
-        df_attendance = pd.concat(attendance_frames, ignore_index=True)
-    else:
-        df_attendance = pd.DataFrame(columns=['user_id', 'timestamp'])
-
-    df_attendance = df_attendance.drop_duplicates(subset=['user_id', 'timestamp'])
-    df_attendance['user_id'] = df_attendance['user_id'].astype(str)
-    df_users['attendance_device_id'] = df_users['attendance_device_id'].astype(str)
-
-    df_merged = pd.merge(df_attendance, df_users, left_on='user_id', right_on='attendance_device_id')
-    df_merged['timestamp'] = pd.to_datetime(df_merged['timestamp'], errors='coerce')
-
-    write_daily_checkin_log(df_merged, df_users, report_start, report_end)
-
     recipients = args.to.split(",") if args.to else ["+966500861820", "+966500860633"]
     recipients = [item.strip() for item in recipients if item.strip()]
     from_number = args.from_number or "+966507163166"
 
-    log_filename = f"daily_checkin_details_{report_start.strftime('%Y%m%d')}_{report_end.strftime('%Y%m%d')}.log"
-    log_path = BASE_DIR / "logs" / log_filename
+    if args.start:
+        report_start, report_end = parse_date_range(args.date, args.start, args.end)
+        report_name = report_start.strftime("%d-%m-%Y")
+        print(f"Generating daily check-in log for {report_start.strftime('%d-%m-%Y')} to {report_end.strftime('%d-%m-%Y')}")
 
-    send_whatsapp(
-        str(log_path),
-        report_name,
-        to_numbers=recipients,
-        from_number=from_number,
-    )
+        df_erp_attendance = get_erp_attendance_data(report_start, report_end)
+        df_bio = get_biometric_data(report_start, report_end)
+        df_users = get_erp_users()
+        df_remote = get_remote_checkin_data(report_start, report_end)
+
+        attendance_frames = []
+        for frame in (df_erp_attendance, df_bio, df_remote):
+            if not frame.empty:
+                attendance_frames.append(frame)
+
+        if attendance_frames:
+            df_attendance = pd.concat(attendance_frames, ignore_index=True)
+        else:
+            df_attendance = pd.DataFrame(columns=['user_id', 'timestamp'])
+
+        df_attendance = df_attendance.drop_duplicates(subset=['user_id', 'timestamp'])
+        df_attendance['user_id'] = df_attendance['user_id'].astype(str)
+        df_users['attendance_device_id'] = df_users['attendance_device_id'].astype(str)
+
+        df_merged = pd.merge(df_attendance, df_users, left_on='user_id', right_on='attendance_device_id')
+        df_merged['timestamp'] = pd.to_datetime(df_merged['timestamp'], errors='coerce')
+
+        write_daily_checkin_log(df_merged, df_users, report_start, report_end)
+        log_path = BASE_DIR / "logs" / "daily_checkin_details.txt"
+        send_email(str(log_path), report_name)
+    elif args.date:
+        report_date = datetime.fromisoformat(args.date)
+        generate_report_for_date(report_date, recipients, from_number)
+    else:
+        today = datetime.now()
+        yesterday = today - timedelta(days=1)
+        for report_date in [yesterday, today]:
+            generate_report_for_date(report_date, recipients, from_number)
 
 
 if __name__ == "__main__":

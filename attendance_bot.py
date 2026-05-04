@@ -1,3 +1,4 @@
+import sqlite3
 import pandas as pd
 from zk import ZK
 import requests
@@ -18,6 +19,8 @@ import io
 import tempfile
 
 BASE_DIR = Path(__file__).resolve().parent
+LOG_DB_PATH = BASE_DIR / "logs" / "attendance_logs.db"
+LOG_TEXT_PATH = BASE_DIR / "logs" / "daily_checkin_details.txt"
 
 # Load variables from .env
 load_dotenv(BASE_DIR / ".env")
@@ -68,6 +71,70 @@ def ensure_log_file_exists():
     return log_path
 
 ensure_log_file_exists()
+
+
+def ensure_log_db():
+    log_dir = BASE_DIR / Path(os.getenv("LOG_DIR", "logs"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(LOG_DB_PATH)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS daily_checkin (
+            log_date TEXT NOT NULL,
+            serial INTEGER NOT NULL,
+            employee_name TEXT NOT NULL,
+            check_in TEXT,
+            check_out TEXT,
+            PRIMARY KEY(log_date, serial)
+        )
+        """
+    )
+    conn.commit()
+    return conn
+
+
+def save_daily_checkin_rows(report_date, rows):
+    with ensure_log_db() as conn:
+        log_date = report_date.strftime("%d-%m-%Y")
+        conn.execute("DELETE FROM daily_checkin WHERE log_date = ?", (log_date,))
+        if rows:
+            conn.executemany(
+                "INSERT INTO daily_checkin (log_date, serial, employee_name, check_in, check_out) VALUES (?, ?, ?, ?, ?)",
+                [(report_date.strftime("%d-%m-%Y"), idx, emp_name, check_in, check_out) for idx, (emp_name, check_in, check_out) in enumerate(rows, start=1)]
+            )
+        conn.commit()
+
+
+def write_consolidated_text_log_from_db():
+    with ensure_log_db() as conn:
+        cursor = conn.execute(
+            "SELECT log_date, serial, employee_name, check_in, check_out FROM daily_checkin ORDER BY log_date, serial"
+        )
+        rows = cursor.fetchall()
+
+    current_date = None
+    with LOG_TEXT_PATH.open('w', encoding='utf-8') as log_file:
+        col_widths = [10, 50, 15, 15]
+        headers = ["Serial No", "Emp. name", "Check-in", "Check-out"]
+        header_line = " | ".join(headers[i].ljust(col_widths[i]) for i in range(len(headers)))
+        separator_line = "-+-".join('-' * col_widths[i] for i in range(len(headers)))
+
+        for log_date, serial, emp_name, check_in, check_out in rows:
+            if log_date != current_date:
+                current_date = log_date
+                if log_file.tell() > 0:
+                    log_file.write("\n")
+                log_file.write("===== Daily Check-In/out Detail Log =====\n")
+                log_file.write(f"Date: {log_date}\n\n")
+                log_file.write(header_line + "\n")
+                log_file.write(separator_line + "\n")
+            line = (
+                str(serial).ljust(col_widths[0]) + " | " +
+                emp_name.ljust(col_widths[1]) + " | " +
+                (check_in or "").ljust(col_widths[2]) + " | " +
+                (check_out or "").ljust(col_widths[3])
+            )
+            log_file.write(line + "\n")
 
 
 def parse_month_arg(month_str):
@@ -352,73 +419,57 @@ def format_duration(start, end):
 
 
 def write_daily_checkin_log(df_merged, df_users, report_start, report_end):
-    log_dir = BASE_DIR / Path(os.getenv("LOG_DIR", "logs"))
-    log_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"daily_checkin_details_{report_start.strftime('%Y%m%d')}_{report_end.strftime('%Y%m%d')}.log"
-    log_path = log_dir / filename
+    exclude_names = {
+        "CHAUHDRY MUHAMMAD ASLAM",
+        "AHMAD HASAN MARJAN",
+        "AHMED HASAN MARJAN",
+        "ALJABRI ABDULELAH MAJED",
+    }
+
+    def normalize_name(value):
+        return " ".join(str(value or "").upper().split())
 
     df_users = df_users.copy()
     df_users['attendance_device_id'] = df_users['attendance_device_id'].astype(str)
     df_merged = df_merged.copy()
     df_merged['attendance_device_id'] = df_merged['attendance_device_id'].astype(str)
+    df_merged['timestamp'] = pd.to_datetime(df_merged['timestamp'], errors='coerce')
+    df_merged = df_merged.dropna(subset=['timestamp'])
     df_merged['date'] = df_merged['timestamp'].dt.date
 
-    odd_entries = []
-    with log_path.open('w', encoding='utf-8') as log_file:
-        log_file.write("===== Daily Check-In Detail Log =====\n")
-        log_file.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        log_file.write(f"Report range: {report_start.date()} to {report_end.date()}\n")
-        log_file.write(f"Mapped employees: {len(df_users)}\n\n")
+    rows = []
+    for _, user in df_users.sort_values('attendance_device_id').iterrows():
+        emp_id = str(user.get('attendance_device_id', '') or '').strip()
+        if not emp_id:
+            continue
+        emp_name = (user.get('employee_name') or user.get('employee') or 'N/A').strip()
+        if normalize_name(emp_name) in exclude_names:
+            continue
 
-        for _, user in df_users.sort_values('attendance_device_id').iterrows():
-            emp_id = str(user.get('attendance_device_id', '') or '').strip()
-            if not emp_id:
-                continue
-            emp_name = user.get('employee_name', 'N/A') or 'N/A'
-            designation = user.get('designation', 'N/A') or 'N/A'
-            department = user.get('department', 'N/A') or 'N/A'
-            log_file.write(f"Employee: {emp_id} | {emp_name} | {designation} | {department}\n")
+        emp_data = df_merged[df_merged['attendance_device_id'] == emp_id]
+        if emp_data.empty:
+            rows.append((emp_name, '', ''))
+            continue
 
-            emp_data = df_merged[df_merged['attendance_device_id'] == emp_id].sort_values('timestamp')
-            if emp_data.empty:
-                log_file.write("  No mapped check-in records in range.\n\n")
-                continue
+        for _, group in emp_data.sort_values('timestamp').groupby('date', sort=True):
+            times = [ts.strftime('%H:%M:%S') for ts in group['timestamp']]
+            check_in = times[0] if times else ''
+            check_out = times[-1] if len(times) > 1 else ''
+            rows.append((emp_name, check_in, check_out))
 
-            for date_val, group in emp_data.groupby('date', sort=True):
-                times = [ts.strftime('%H:%M:%S') for ts in group['timestamp']]
-                date_label = f"{date_val} ({date_val.strftime('%a')})"
+    atif_row = None
+    for idx, row in enumerate(rows):
+        if row[0] == 'MUHAMMAD ATIF ZAFAR':
+            atif_row = rows.pop(idx)
+            break
+    if atif_row is not None:
+        insert_index = next((i for i, row in enumerate(rows) if row[0] == 'MUHAMMAD ZAFAR HAJI'), len(rows))
+        rows.insert(insert_index + 1, atif_row)
 
-                if len(times) == 1:
-                    log_file.write(f"  {date_label}: single punch {times[0]}\n")
-                    odd_entries.append((emp_id, emp_name, date_val, times, 'single punch'))
-                elif len(times) % 2 == 1:
-                    check_in = times[0]
-                    check_out = times[-1]
-                    duration = format_duration(group['timestamp'].iloc[0], group['timestamp'].iloc[-1])
-                    log_file.write(
-                        f"  {date_label}: check-in {check_in}, check-out {check_out}, duration {duration}, punches: {', '.join(times)} [ODD COUNT]\n"
-                    )
-                    odd_entries.append((emp_id, emp_name, date_val, times, 'odd count'))
-                else:
-                    check_in = times[0]
-                    check_out = times[-1]
-                    duration = format_duration(group['timestamp'].iloc[0], group['timestamp'].iloc[-1])
-                    log_file.write(
-                        f"  {date_label}: check-in {check_in}, check-out {check_out}, duration {duration}, punches: {', '.join(times)}\n"
-                    )
+    save_daily_checkin_rows(report_start, rows)
+    write_consolidated_text_log_from_db()
 
-            log_file.write("\n")
-
-        log_file.write("===== ODD / INCOMPLETE CHECK-INS =====\n")
-        if not odd_entries:
-            log_file.write("No odd or incomplete records found.\n")
-        else:
-            for emp_id, emp_name, date_val, times, reason in odd_entries:
-                log_file.write(
-                    f"Employee {emp_id} | {emp_name} | {date_val} | reason={reason} | punches: {', '.join(times)}\n"
-                )
-
-    print(f"Daily check-in detail log written to: {log_path}")
+    print(f"Daily check-in detail log updated in DB and consolidated file: {LOG_TEXT_PATH}")
 
 # 3. Generate PDF Summary
 # 3. Generate PDF Summary
@@ -627,7 +678,7 @@ def send_email(filename, month_name):
     msg['To'] = os.getenv("RECIPIENT_EMAIL")
     
     with open(filename, "rb") as f:
-        attach = MIMEApplication(f.read(), _subtype="pdf")
+        attach = MIMEApplication(f.read(), _subtype="txt")
         attach.add_header('Content-Disposition', 'attachment', filename=Path(filename).name)
         msg.attach(attach)
     

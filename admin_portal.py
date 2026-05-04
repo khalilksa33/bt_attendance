@@ -2,6 +2,7 @@
 import json
 import os
 import hashlib
+import sqlite3
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -75,6 +76,63 @@ def get_session_from_request(self):
             if part.startswith("admin_token="):
                 return part.split("=", 1)[1]
     return self.headers.get("X-Admin-Token")
+
+
+def ensure_log_db():
+    log_dir = BASE_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(BASE_DIR / "logs" / "attendance_logs.db")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS daily_checkin (
+            log_date TEXT NOT NULL,
+            serial INTEGER NOT NULL,
+            employee_name TEXT NOT NULL,
+            check_in TEXT,
+            check_out TEXT,
+            PRIMARY KEY(log_date, serial)
+        )
+        """
+    )
+    conn.commit()
+    return conn
+
+
+def get_log_files():
+    with ensure_log_db() as conn:
+        cursor = conn.execute("SELECT DISTINCT log_date FROM daily_checkin ORDER BY log_date")
+        rows = cursor.fetchall()
+    logs = []
+    for row in rows:
+        date_label = row[0]
+        logs.append({
+            "filename": f"daily_checkin_details_{date_label}.txt",
+            "label": date_label,
+            "start_date": date_label,
+            "end_date": date_label,
+        })
+    return logs
+
+
+def parse_log_file(filename):
+    if not filename.startswith("daily_checkin_details_") or not filename.endswith(".txt"):
+        return []
+    log_date = filename.replace("daily_checkin_details_", "").replace(".txt", "")
+    with ensure_log_db() as conn:
+        cursor = conn.execute(
+            "SELECT serial, employee_name, check_in, check_out FROM daily_checkin WHERE log_date = ? ORDER BY serial",
+            (log_date,)
+        )
+        rows = cursor.fetchall()
+    return [
+        {
+            "serial": str(serial),
+            "employee_name": employee_name,
+            "check_in": check_in or "",
+            "check_out": check_out or "",
+        }
+        for serial, employee_name, check_in, check_out in rows
+    ]
 
 
 class AdminHandler(BaseHTTPRequestHandler):
@@ -197,6 +255,9 @@ class AdminHandler(BaseHTTPRequestHandler):
 <body>
     <div class="container">
         <h1>IICC Admin Dashboard</h1>
+        <div style="margin-bottom: 18px;">
+            <button onclick="window.location.href='/admin/reports.html?token='+token" style="background: #007bff; color: #fff; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer;">View Daily Check-In Logs</button>
+        </div>
         <div id="message"></div>
         
         <div class="card">
@@ -334,6 +395,145 @@ class AdminHandler(BaseHTTPRequestHandler):
 </body>
 </html>"""
             self.wfile.write(html.encode())
+            return
+
+        if parsed_path.path == "/admin/reports":
+            self._set_headers(302, "text/html")
+            self.send_header("Location", "/admin/reports.html")
+            self.end_headers()
+            return
+
+        if parsed_path.path == "/admin/reports.html":
+            token = get_session_from_request(self)
+            if not token or not get_admin_session(token):
+                self._set_headers(302, "text/html")
+                self.send_header("Location", "/admin/login.html")
+                self.end_headers()
+                return
+
+            self._set_headers(200, "text/html")
+            html = """<!DOCTYPE html>
+<html>
+<head>
+    <title>IICC Daily Check-In Logs</title>
+    <style>
+        body { font-family: Arial; background: #f5f5f5; margin: 0; padding: 20px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        h1 { color: #333; border-bottom: 2px solid #c00; padding-bottom: 10px; }
+        .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 20px 0; }
+        .toolbar button, .toolbar select { padding: 10px 14px; border-radius: 6px; border: 1px solid #ccc; }
+        .toolbar button { background: #c00; color: #fff; border: none; cursor: pointer; }
+        .toolbar button:hover { background: #900; }
+        .card { background: white; padding: 20px; margin: 20px 0; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; min-width: 680px; }
+        th, td { padding: 8px 10px; border: 1px solid #ddd; text-align: left; }
+        th { background: #f0f0f0; }
+        .no-data { padding: 16px; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Daily Check-In Logs</h1>
+        <div class="toolbar">
+            <button onclick="window.location.href='/admin/dashboard.html?token='+token">Back to Dashboard</button>
+            <label for="logDate">Date:</label>
+            <select id="logDate" onchange="loadSelectedLog()"></select>
+        </div>
+        <div class="card">
+            <div id="logMeta"></div>
+            <div class="table-wrap">
+                <table id="logTable">
+                    <thead>
+                        <tr>
+                            <th>Serial No</th>
+                            <th>Emp. name</th>
+                            <th>Check-in</th>
+                            <th>Check-out</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logBody"></tbody>
+                </table>
+            </div>
+            <div id="noData" class="no-data" style="display:none;">No log data available for the selected date.</div>
+        </div>
+    </div>
+    <script>
+        const token = new URLSearchParams(window.location.search).get('token');
+
+        async function loadLogFiles() {
+            const response = await fetch('/admin/api/logs', {
+                headers: { 'X-Admin-Token': token }
+            });
+            const logs = await response.json();
+            const select = document.getElementById('logDate');
+            select.innerHTML = logs.map(log => `<option value="${log.filename}">${log.label}</option>`).join('');
+            if (logs.length) {
+                loadSelectedLog();
+            } else {
+                document.getElementById('logBody').innerHTML = '';
+                document.getElementById('noData').style.display = 'block';
+                document.getElementById('logMeta').textContent = '';
+            }
+        }
+
+        async function loadSelectedLog() {
+            const filename = document.getElementById('logDate').value;
+            if (!filename) return;
+            const response = await fetch('/admin/api/log?file=' + encodeURIComponent(filename), {
+                headers: { 'X-Admin-Token': token }
+            });
+            const data = await response.json();
+            const rows = data.rows || [];
+            const body = document.getElementById('logBody');
+            body.innerHTML = rows.map(row => `
+                <tr>
+                    <td>${row.serial}</td>
+                    <td>${row.employee_name}</td>
+                    <td>${row.check_in}</td>
+                    <td>${row.check_out}</td>
+                </tr>
+            `).join('');
+            document.getElementById('noData').style.display = rows.length ? 'none' : 'block';
+            document.getElementById('logMeta').textContent = `Showing ${rows.length} rows from ${filename}`;
+        }
+
+        loadLogFiles();
+    </script>
+</body>
+</html>"""
+            self.wfile.write(html.encode())
+            return
+
+        if parsed_path.path == "/admin/api/logs":
+            token = get_session_from_request(self)
+            if not token or not get_admin_session(token):
+                self._set_headers(401, "application/json")
+                self.wfile.write(json.dumps({"error": "Unauthorized"}).encode())
+                return
+
+            self._set_headers(200, "application/json")
+            self.wfile.write(json.dumps(get_log_files()).encode())
+            return
+
+        if parsed_path.path == "/admin/api/log":
+            token = get_session_from_request(self)
+            if not token or not get_admin_session(token):
+                self._set_headers(401, "application/json")
+                self.wfile.write(json.dumps({"error": "Unauthorized"}).encode())
+                return
+
+            query = parse_qs(parsed_path.query)
+            filename = query.get("file", [""])[0]
+            valid_files = [item["filename"] for item in get_log_files()]
+            if filename not in valid_files:
+                self._set_headers(404, "application/json")
+                self.wfile.write(json.dumps({"error": "Log file not found"}).encode())
+                return
+
+            rows = parse_log_file(filename)
+            self._set_headers(200, "application/json")
+            self.wfile.write(json.dumps({"filename": filename, "rows": rows}).encode())
             return
 
         if parsed_path.path == "/admin/api/settings":
