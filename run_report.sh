@@ -9,7 +9,7 @@ source .venv/bin/activate
 
 # Execute the Python script
 echo "Starting Attendance Report Generation for $(date +%B)..."
-python attendance_bot.py
+python daily_checkin_log.py
 
 if [ $? -eq 0 ]; then
     echo "Report sent successfully."
@@ -18,5 +18,5 @@ else
 fi
 
 # Cron schedule:
-# Daily at 10:00 AM
-# 0 10 * * * /bin/bash /home/frappe/bt_attendance/run_report.sh >> /home/frappe/bt_attendance/log.txt 2>&1
+# Daily at 9:30 AM
+# 30 9 * * * /bin/bash /home/frappe/bt_attendance/run_report.sh >> /home/frappe/bt_attendance/log.txt 2>&1

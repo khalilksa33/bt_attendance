@@ -19,7 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Generate a daily-only human-readable check-in log and notify selected recipients."
+        description="Generate a daily-only human-readable check-in log and notify selected WhatsApp recipients."
     )
     parser.add_argument(
         "--date",
@@ -35,12 +35,12 @@ def parse_args():
     )
     parser.add_argument(
         "--to",
-        help="Comma-separated recipient numbers or identifiers.",
+        help="Comma-separated WhatsApp recipient numbers. Example: +966500861820,+966500860633",
     )
     parser.add_argument(
         "--from",
         dest="from_number",
-        help="Sender identifier or configuration.",
+        help="WhatsApp from number. Example: +966507163166",
     )
     return parser.parse_args()
 
@@ -63,16 +63,12 @@ def parse_date_range(date_arg, start_arg, end_arg):
     return start, end
 
 
-def generate_report_for_date(report_date):
-    """
-    Fetches attendance sources and generates log file entries for a given date.
-    Email execution has been decoupled from this function to avoid duplicate dispatches.
-    """
+def generate_report_for_date(report_date, recipients, from_number):
     report_start = datetime(report_date.year, report_date.month, report_date.day)
     report_end = report_start.replace(hour=23, minute=59, second=59, microsecond=999999)
     report_name = report_start.strftime("%d-%m-%Y")
 
-    print(f"Generating daily check-in log data for {report_name}")
+    print(f"Generating daily check-in log for {report_name}")
 
     try:
         df_erp_attendance = get_erp_attendance_data(report_start, report_end)
@@ -99,19 +95,29 @@ def generate_report_for_date(report_date):
 
         write_daily_checkin_log(df_merged, df_users, report_start, report_end)
 
+        log_path = BASE_DIR / "logs" / "daily_checkin_details.txt"
+
+        try:
+            send_email(
+                str(log_path),
+                report_name,
+            )
+        except Exception as exc:
+            print(f"Email send failed for daily_checkin_details.txt: {exc}")
     except Exception as exc:
         print(f"Report generation failed for {report_name}: {exc}")
-        raise exc
 
 
 def main():
     args = parse_args()
-    log_path = BASE_DIR / "logs" / "daily_checkin_details.txt"
+    recipients = args.to.split(",") if args.to else ["+966500861820", "+966500860633"]
+    recipients = [item.strip() for item in recipients if item.strip()]
+    from_number = args.from_number or "+966507163166"
 
     if args.start:
         report_start, report_end = parse_date_range(args.date, args.start, args.end)
-        report_name = f"{report_start.strftime('%d-%m-%Y')} to {report_end.strftime('%d-%m-%Y')}"
-        print(f"Generating daily check-in log range for {report_name}")
+        report_name = report_start.strftime("%d-%m-%Y")
+        print(f"Generating daily check-in log for {report_start.strftime('%d-%m-%Y')} to {report_end.strftime('%d-%m-%Y')}")
 
         df_erp_attendance = get_erp_attendance_data(report_start, report_end)
         df_bio = get_biometric_data(report_start, report_end)
@@ -136,40 +142,21 @@ def main():
         df_merged['timestamp'] = pd.to_datetime(df_merged['timestamp'], errors='coerce')
 
         write_daily_checkin_log(df_merged, df_users, report_start, report_end)
-        
-        print(f"Sending single email for data range: {report_name}")
+        log_path = BASE_DIR / "logs" / "daily_checkin_details.txt"
         send_email(str(log_path), report_name)
-
     elif args.date:
         report_date = datetime.fromisoformat(args.date)
-        report_name = report_date.strftime("%d-%m-%Y")
-        
-        generate_report_for_date(report_date)
-        
-        print(f"Sending single email for explicit date: {report_name}")
-        send_email(str(log_path), report_name)
-
+        generate_report_for_date(report_date, recipients, from_number)
     else:
-        # Default automated run execution path
         today = datetime.now()
         yesterday = today - timedelta(days=1)
-        
-        # 1. Process data calculations sequentially for both days
         for report_date in [yesterday, today]:
-            generate_report_for_date(report_date)
-        
-        # 2. Dispatch exactly ONE email transaction containing the bundled updates
-        email_label = f"{yesterday.strftime('%d-%m-%Y')} and {today.strftime('%d-%m-%Y')}"
-        try:
-            print(f"Sending combined automated email transaction for {email_label}...")
-            send_email(str(log_path), email_label)
-        except Exception as exc:
-            print(f"Combined email send transaction failed: {exc}")
+            generate_report_for_date(report_date, recipients, from_number)
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"Fatal execution error occurred: {exc}")
+        print(f"Error: {exc}")
         raise

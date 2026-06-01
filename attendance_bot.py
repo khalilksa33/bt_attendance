@@ -169,7 +169,7 @@ def should_send_report(now=None):
         now = datetime.now()
     if os.getenv("FORCE_SEND", "0") == "1":
         return True
-    if now.hour != 10:
+    if now.hour != 9:
         return False
     return True
 
@@ -771,7 +771,7 @@ if __name__ == "__main__":
 
     if report_date is None:
         if not should_send_report():
-            print("Skipping report generation. Scheduled for daily 10:00 AM unless FORCE_SEND=1.")
+            print("Skipping report generation. Scheduled for daily 9:30 AM unless FORCE_SEND=1.")
             sys.exit(0)
         report_date = datetime.now()
     else:
