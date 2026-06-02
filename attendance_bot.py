@@ -25,7 +25,7 @@ LOG_TEXT_PATH = BASE_DIR / "logs" / "daily_checkin_details.txt"
 # Load variables from .env
 load_dotenv(BASE_DIR / ".env")
 
-LOGO_PATH = Path(os.getenv("LOGO_PATH", str(BASE_DIR / "company_logo.png")))
+LOGO_PATH = Path(os.getenv("LOGO_PATH", str(BASE_DIR / "reports" / "images" / "iicc_final_logo.jpeg")))
 if not LOGO_PATH.is_absolute():
     LOGO_PATH = (BASE_DIR / LOGO_PATH).resolve()
 
@@ -108,9 +108,22 @@ def save_daily_checkin_rows(report_date, rows):
 def write_consolidated_text_log_from_db():
     with ensure_log_db() as conn:
         cursor = conn.execute(
-            "SELECT log_date, serial, employee_name, check_in, check_out FROM daily_checkin ORDER BY log_date, serial"
+            "SELECT log_date, serial, employee_name, check_in, check_out FROM daily_checkin"
         )
         rows = cursor.fetchall()
+    # Normalize and sort rows chronologically by parsed date (day-first) and serial.
+    normalized_rows = [
+        (str(r[0]).strip(), int(r[1]), str(r[2] or ''), str(r[3] or ''), str(r[4] or ''))
+        for r in rows
+    ]
+
+    def _parse_dd_mm_yyyy(s):
+        try:
+            return datetime.strptime(s, "%d-%m-%Y")
+        except Exception:
+            return datetime.min
+
+    normalized_rows.sort(key=lambda item: (_parse_dd_mm_yyyy(item[0]), item[1]))
 
     current_date = None
     with LOG_TEXT_PATH.open('w', encoding='utf-8') as log_file:
@@ -119,7 +132,7 @@ def write_consolidated_text_log_from_db():
         header_line = " | ".join(headers[i].ljust(col_widths[i]) for i in range(len(headers)))
         separator_line = "-+-".join('-' * col_widths[i] for i in range(len(headers)))
 
-        for log_date, serial, emp_name, check_in, check_out in rows:
+        for log_date, serial, emp_name, check_in, check_out in normalized_rows:
             if log_date != current_date:
                 current_date = log_date
                 if log_file.tell() > 0:
@@ -178,16 +191,13 @@ def add_page_header(pdf, month_name, page_title):
     pdf.set_line_width(0.18)
     pdf.set_draw_color(192, 0, 0)
     pdf.set_text_color(192, 0, 0)
-    pdf.set_font("Arial", "B", 14)
-    pdf.set_y(5)
     if LOGO_PATH.is_file():
         pdf.image(str(LOGO_PATH), x=5, y=5, w=25)
-        pdf.set_y(18)
-    else:
         pdf.set_y(12)
+    else:
+        pdf.set_y(8)
     pdf.set_x(pdf.l_margin)
     content_width = pdf.w - pdf.l_margin - pdf.r_margin
-    pdf.cell(content_width, 6, "Insight International Contracting Company (IICC) www.iicc.sa", ln=1, align='C')
     pdf.set_font("Arial", "B", 12)
     pdf.cell(content_width, 6, page_title, ln=1, align='C')
     pdf.set_font("Arial", "", 10)
@@ -477,7 +487,7 @@ def create_pdf(df_final, filename, month_name, df_merged):
     pdf = FPDF('L', 'mm', 'A4')
     pdf.set_auto_page_break(auto=False, margin=0)
     pdf.add_page()
-    add_page_header(pdf, month_name, f"Daily Attendance Summary - {month_name}")
+    add_page_header(pdf, month_name, "Monthly Attendance Summary")
 
     table_width = 255
     page_width = pdf.w
@@ -515,7 +525,7 @@ def create_pdf(df_final, filename, month_name, df_merged):
         if row_y + row_height > pdf.h - 20:
             add_page_footer(pdf)
             pdf.add_page()
-            add_page_header(pdf, month_name, f"Monthly Attendance Summary - {month_name}")
+            add_page_header(pdf, month_name, "Monthly Attendance Summary")
             table_y = pdf.get_y()
             pdf.set_font("Arial", "B", 10)
             pdf.set_fill_color(192, 0, 0)
@@ -773,7 +783,13 @@ if __name__ == "__main__":
         if not should_send_report():
             print("Skipping report generation. Scheduled for daily 9:30 AM unless FORCE_SEND=1.")
             sys.exit(0)
-        report_date = datetime.now()
+        today = datetime.now()
+        if today.day == 1:
+            # On the 1st of the month, default to the previous month
+            report_date = today - timedelta(days=1)
+            print(f"Today is the 1st of the month. Defaulting to previous month: {report_date.strftime('%B %Y')}")
+        else:
+            report_date = today
     else:
         print(f"Generating one-off attendance report for {report_date.strftime('%B %Y')}.")
 
