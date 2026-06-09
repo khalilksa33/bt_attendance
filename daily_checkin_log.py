@@ -107,11 +107,13 @@ def generate_report_for_date(report_date):
 def main():
     args = parse_args()
     log_path = BASE_DIR / "logs" / "daily_checkin_details.txt"
+    email_sent = False
+    email_label = None
 
     if args.start:
         report_start, report_end = parse_date_range(args.date, args.start, args.end)
-        report_name = f"{report_start.strftime('%d-%m-%Y')} to {report_end.strftime('%d-%m-%Y')}"
-        print(f"Generating daily check-in log range for {report_name}")
+        email_label = f"{report_start.strftime('%d-%m-%Y')} to {report_end.strftime('%d-%m-%Y')}"
+        print(f"Generating daily check-in log range for {email_label}")
 
         df_erp_attendance = get_erp_attendance_data(report_start, report_end)
         df_bio = get_biometric_data(report_start, report_end)
@@ -136,18 +138,14 @@ def main():
         df_merged['timestamp'] = pd.to_datetime(df_merged['timestamp'], errors='coerce')
 
         write_daily_checkin_log(df_merged, df_users, report_start, report_end)
-        
-        print(f"Sending single email for data range: {report_name}")
-        send_email(str(log_path), report_name)
+        email_sent = True
 
     elif args.date:
         report_date = datetime.fromisoformat(args.date)
-        report_name = report_date.strftime("%d-%m-%Y")
+        email_label = report_date.strftime("%d-%m-%Y")
         
         generate_report_for_date(report_date)
-        
-        print(f"Sending single email for explicit date: {report_name}")
-        send_email(str(log_path), report_name)
+        email_sent = True
 
     else:
         # Default automated run execution path
@@ -158,13 +156,18 @@ def main():
         for report_date in [yesterday, today]:
             generate_report_for_date(report_date)
         
-        # 2. Dispatch exactly ONE email transaction containing the bundled updates
         email_label = f"{yesterday.strftime('%d-%m-%Y')} and {today.strftime('%d-%m-%Y')}"
+        email_sent = True
+
+    # 2. Send exactly ONE email transaction (consolidated at end to prevent duplicates)
+    if email_sent and email_label:
         try:
-            print(f"Sending combined automated email transaction for {email_label}...")
+            print(f"Sending email for: {email_label}")
             send_email(str(log_path), email_label)
+            print("Email sent successfully.")
         except Exception as exc:
-            print(f"Combined email send transaction failed: {exc}")
+            print(f"Email send failed: {exc}")
+            raise
 
 
 if __name__ == "__main__":
