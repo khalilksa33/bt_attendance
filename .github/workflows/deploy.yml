@@ -6,7 +6,42 @@ on:
       - main
 
 jobs:
-  deploy:
+  build-and-push-docker:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract version from git
+        id: meta
+        run: |
+          VERSION=$(git rev-parse --short HEAD)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/bt_attendance:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/bt_attendance:${{ steps.meta.outputs.version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/bt_attendance:${{ steps.meta.outputs.timestamp }}
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/bt_attendance:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/bt_attendance:buildcache,mode=max
+
+  syntax-check:
     runs-on: ubuntu-latest
     
     steps:
@@ -30,6 +65,14 @@ jobs:
           python -m py_compile portal.py
           python -m py_compile admin_portal.py
 
+  deploy:
+    needs: [build-and-push-docker, syntax-check]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
       - name: Create SSH key from secrets
         run: |
           mkdir -p ~/.ssh
@@ -37,17 +80,60 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.HOST_A_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: Deploy to Host A via SSH
+      - name: Deploy Docker containers to Host A
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.HOST_A_USER }}@${{ secrets.HOST_A_IP }} << 'EOF'
+          set -e
+          
+          echo "=== BT Attendance Docker Deployment ==="
+          
+          # Navigate to project directory
+          cd ~/bt_attendance
+          
+          # Pull latest code
+          git pull origin main
+          
+          # Ensure .env exists
+          if [ ! -f .env ]; then
+            cp .env.example .env
+            echo "⚠️  Created .env from template - please edit with your configuration"
+          fi
+          
+          # Login to Docker Hub
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          
+          # Pull latest Docker images
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/bt_attendance:latest
+          
+          # Stop and remove old containers
+          docker-compose down 2>/dev/null || true
+          
+          # Start new containers
+          docker-compose up -d
+          
+          # Wait for services to be ready
+          sleep 5
+          
+          # Check container status
+          echo ""
+          echo "=== Container Status ==="
+          docker-compose ps
+          
+          # Verify services are responding
+          echo ""
+          echo "=== Service Verification ==="
+          docker-compose logs --tail=5
+          
+          echo ""
+          echo "✅ Deployment completed successfully"
+          echo "Portal: http://192.168.8.250:5001"
+          echo "Admin: http://192.168.8.250:5002"
+          EOF
+
+      - name: Verify deployment
         run: |
           ssh -i ~/.ssh/id_rsa ${{ secrets.HOST_A_USER }}@${{ secrets.HOST_A_IP }} \
-            "cd /home/${{ secrets.HOST_A_USER }}/bt_attendance && \
-             git pull origin main && \
-             python -m venv .venv 2>/dev/null || true && \
-             source .venv/bin/activate && \
-             pip install --upgrade pip && \
-             pip install -r requirements.txt && \
-             systemctl --user restart portal attendance-bot admin-portal 2>/dev/null || true && \
-             echo 'Deployment completed successfully'"
+            "cd ~/bt_attendance && docker-compose ps && echo '✅ All services running'"
 
       - name: Notify deployment success
         if: success()

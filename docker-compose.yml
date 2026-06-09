@@ -1,0 +1,71 @@
+version: '3.9'
+
+services:
+  portal:
+    build: .
+    container_name: bt_attendance_portal
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./remote_checkins.json:/app/remote_checkins.json
+    command: python portal.py
+    restart: unless-stopped
+    networks:
+      - bt_attendance
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  admin-portal:
+    build: .
+    container_name: bt_attendance_admin
+    ports:
+      - "5002:5002"
+    environment:
+      - ADMIN_PORTAL_PORT=5002
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+    command: python admin_portal.py
+    restart: unless-stopped
+    networks:
+      - bt_attendance
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  attendance-bot:
+    build: .
+    container_name: bt_attendance_bot
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./remote_checkins.json:/app/remote_checkins.json
+    command: python daily_checkin_log.py
+    restart: "no"
+    networks:
+      - bt_attendance
+
+networks:
+  bt_attendance:
+    driver: bridge

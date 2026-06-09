@@ -1,0 +1,53 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache
+.coverage
+dist
+build
+*.egg-info
+.venv
+venv
+
+# OS
+.DS_Store
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+*.txt
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# Documentation
+docs/
+README.md
+*.md
+
+# Tests
+tests/
+test_*.py
+
+# Temporary
+.tmp
+temp/
+*.bak
