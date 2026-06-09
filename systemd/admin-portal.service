@@ -1,0 +1,20 @@
+[Unit]
+Description=BT Attendance Admin Portal (Port 5002)
+After=network.target
+Documentation=https://github.com/khalilksa33/bt_attendance
+
+[Service]
+Type=simple
+User=%u
+WorkingDirectory=%h/bt_attendance
+Environment="PATH=%h/bt_attendance/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStartPre=/bin/bash -c 'test -d %h/bt_attendance/.venv || python3 -m venv %h/bt_attendance/.venv'
+ExecStart=%h/bt_attendance/.venv/bin/python admin_portal.py
+Restart=always
+RestartSec=10
+StandardOutput=append:%h/bt_attendance/logs/admin_portal.log
+StandardError=append:%h/bt_attendance/logs/admin_portal.log
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=default.target

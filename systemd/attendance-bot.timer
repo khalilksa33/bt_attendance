@@ -1,0 +1,11 @@
+[Unit]
+Description=BT Attendance Bot Daily Report Timer
+Documentation=https://github.com/khalilksa33/bt_attendance
+
+[Timer]
+# Run daily at 9:30 AM
+OnCalendar=*-*-* 09:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

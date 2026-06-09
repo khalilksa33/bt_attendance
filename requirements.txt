@@ -1,0 +1,9 @@
+pandas==2.1.3
+requests==2.31.0
+python-dotenv==1.0.0
+fpdf2==2.7.0
+openpyxl==3.11.0
+matplotlib==3.8.2
+pyzk==0.9.8
+smtplib-ssl==0.1.0
+python-dateutil==2.8.2
